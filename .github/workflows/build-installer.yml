@@ -1,0 +1,111 @@
+name: Build AL-ROWAD Windows Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private source branch or commit to build
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build signed Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+      SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+    steps:
+      - name: Checkout private application source
+        uses: actions/checkout@v4
+        with:
+          repository: anwrklel7/alrowad-logistics
+          ref: ${{ inputs.source_ref }}
+          path: source
+          token: ${{ secrets.PRIVATE_SOURCE_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.0
+          cache: true
+
+      - name: Install packages
+        working-directory: source
+        run: flutter pub get
+
+      - name: Analyze source
+        working-directory: source
+        run: flutter analyze
+
+      - name: Test source
+        working-directory: source
+        run: flutter test
+
+      - name: Build Windows release
+        working-directory: source
+        run: flutter build windows --release
+
+      - name: Restore signing certificate
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'alrowad-signing.pfx'
+          [IO.File]::WriteAllBytes(
+            $certificatePath,
+            [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64)
+          )
+          "WINDOWS_SIGNING_CERTIFICATE_PATH=$certificatePath" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Locate SignTool
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signTool) { throw 'signtool.exe was not found on the Windows runner.' }
+          "WINDOWS_SIGNTOOL_PATH=$signTool" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Sign Windows executable
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\build\windows\x64\runner\Release\AL-ROWAD Logistics.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Signing the Windows executable failed.' }
+
+      - name: Create installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.5
+        with:
+          path: source/installer/alrowad.iss
+
+      - name: Sign installer
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\installer\output\AlRowad-Setup-1.0.0.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Signing the installer failed.' }
+
+      - name: Verify installer signature
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          & $env:WINDOWS_SIGNTOOL_PATH verify /pa /v 'source\installer\output\AlRowad-Setup-1.0.0.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Installer signature verification failed.' }
+
+      - name: Publish installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AlRowad-Setup-Windows
+          path: source/installer/output/AlRowad-Setup-1.0.0.exe
+          if-no-files-found: error
+          retention-days: 7
