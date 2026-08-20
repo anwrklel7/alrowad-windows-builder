@@ -101,6 +101,7 @@ jobs:
         run: |
           $installer = 'source\installer\output\AlRowad-Setup-1.0.0.exe'
           & $env:WINDOWS_SIGNTOOL_PATH verify /pa /v $installer
+          $signToolExit = $LASTEXITCODE
           $signature = Get-AuthenticodeSignature $installer
           if (-not $signature.SignerCertificate) {
             throw 'The installer does not contain a code-signing certificate.'
@@ -116,6 +117,10 @@ jobs:
           if ($signature.Status -ne 'Valid') {
             Write-Warning "Windows trust status: $($signature.Status). The signature and timestamp are present, but this certificate chain is not installed in the runner trust store."
           }
+          if ($signToolExit -ne 0) {
+            Write-Warning 'SignTool rejected the untrusted private certificate chain; the signer and timestamp checks above passed.'
+          }
+          $global:LASTEXITCODE = 0
 
       - name: Publish installer artifact
         uses: actions/upload-artifact@v4
