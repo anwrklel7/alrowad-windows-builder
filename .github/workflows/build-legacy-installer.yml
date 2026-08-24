@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Private legacy source branch or commit to build
+        description: Source branch or commit containing the legacy-windows edition
         required: true
-        default: main
+        default: legacy-windows
         type: string
 
 permissions:
@@ -21,13 +21,13 @@ jobs:
       SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
       SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
     steps:
-      - name: Checkout private legacy source
+      - name: Checkout private application source
         uses: actions/checkout@v4
         with:
-          repository: anwrklel7/alrowad-legacy-windows
+          repository: anwrklel7/alrowad-logistics
           ref: ${{ inputs.source_ref }}
           path: source
-          token: ${{ secrets.LEGACY_SOURCE_READ_TOKEN }}
+          token: ${{ secrets.PRIVATE_SOURCE_READ_TOKEN }}
           persist-credentials: false
 
       - name: Set up .NET
@@ -36,15 +36,15 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore packages
-        working-directory: source
+        working-directory: source/legacy-windows
         run: dotnet restore src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj
 
       - name: Build legacy application
-        working-directory: source
+        working-directory: source/legacy-windows
         run: dotnet build src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj --configuration Release --no-restore /warnaserror
 
       - name: Publish self-contained x64 application
-        working-directory: source
+        working-directory: source/legacy-windows
         run: dotnet publish src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj --configuration Release --runtime win-x64 --self-contained true --no-restore --output publish /p:PublishSingleFile=false /p:PublishTrimmed=false
 
       - name: Restore signing certificate
@@ -74,26 +74,26 @@ jobs:
         if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
         shell: pwsh
         run: |
-          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\publish\AL-ROWAD Logistics Legacy.exe'
+          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\legacy-windows\publish\AL-ROWAD Logistics Legacy.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Signing the legacy executable failed.' }
 
       - name: Create legacy installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.5
         with:
-          path: source/installer/alrowad-legacy.iss
+          path: source/legacy-windows/installer/alrowad-legacy.iss
 
       - name: Sign legacy installer
         if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
         shell: pwsh
         run: |
-          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\installer\output\AlRowad-Legacy-Setup-1.0.0.exe'
+          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\legacy-windows\installer\output\AlRowad-Legacy-Setup-1.0.0.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Signing the legacy installer failed.' }
 
       - name: Inspect legacy installer signature
         if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
         shell: pwsh
         run: |
-          $installer = 'source\installer\output\AlRowad-Legacy-Setup-1.0.0.exe'
+          $installer = 'source\legacy-windows\installer\output\AlRowad-Legacy-Setup-1.0.0.exe'
           & $env:WINDOWS_SIGNTOOL_PATH verify /pa /v $installer
           $signToolExit = $LASTEXITCODE
           $signature = Get-AuthenticodeSignature $installer
@@ -108,6 +108,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AlRowad-Legacy-Setup-Windows
-          path: source/installer/output/AlRowad-Legacy-Setup-1.0.0.exe
+          path: source/legacy-windows/installer/output/AlRowad-Legacy-Setup-1.0.0.exe
           if-no-files-found: error
           retention-days: 7
