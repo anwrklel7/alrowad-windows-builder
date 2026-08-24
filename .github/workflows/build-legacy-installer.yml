@@ -37,7 +37,13 @@ jobs:
 
       - name: Restore packages
         working-directory: source/legacy-windows
-        run: dotnet restore src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj --runtime win-x64
+        run: |
+          dotnet restore src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj --runtime win-x64
+          dotnet restore src/AlRowad.Legacy.Tests/AlRowad.Legacy.Tests.csproj
+
+      - name: Run legacy tests
+        working-directory: source/legacy-windows
+        run: dotnet test src/AlRowad.Legacy.Tests/AlRowad.Legacy.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=normal"
 
       - name: Build legacy application
         working-directory: source/legacy-windows
