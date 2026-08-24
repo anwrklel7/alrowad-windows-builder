@@ -92,14 +92,14 @@ jobs:
         if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
         shell: pwsh
         run: |
-          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\legacy-windows\installer\output\AlRowad-Legacy-Setup-1.0.0.exe'
+          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\legacy-windows\installer\output\AlRowad-Legacy-Setup-1.0.1.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Signing the legacy installer failed.' }
 
       - name: Inspect legacy installer signature
         if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
         shell: pwsh
         run: |
-          $installer = 'source\legacy-windows\installer\output\AlRowad-Legacy-Setup-1.0.0.exe'
+          $installer = 'source\legacy-windows\installer\output\AlRowad-Legacy-Setup-1.0.1.exe'
           & $env:WINDOWS_SIGNTOOL_PATH verify /pa /v $installer
           $signToolExit = $LASTEXITCODE
           $signature = Get-AuthenticodeSignature $installer
@@ -114,6 +114,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AlRowad-Legacy-Setup-Windows
-          path: source/legacy-windows/installer/output/AlRowad-Legacy-Setup-1.0.0.exe
+          path: source/legacy-windows/installer/output/AlRowad-Legacy-Setup-1.0.1.exe
           if-no-files-found: error
           retention-days: 7
