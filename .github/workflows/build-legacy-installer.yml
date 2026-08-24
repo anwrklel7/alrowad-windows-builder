@@ -37,7 +37,7 @@ jobs:
 
       - name: Restore packages
         working-directory: source/legacy-windows
-        run: dotnet restore src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj
+        run: dotnet restore src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj --runtime win-x64
 
       - name: Build legacy application
         working-directory: source/legacy-windows
