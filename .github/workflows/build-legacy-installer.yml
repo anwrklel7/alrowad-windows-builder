@@ -1,0 +1,113 @@
+name: Build Legacy Windows Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private legacy source branch or commit to build
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-legacy-windows:
+    name: Build signed legacy-compatible installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+      SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+    steps:
+      - name: Checkout private legacy source
+        uses: actions/checkout@v4
+        with:
+          repository: anwrklel7/alrowad-legacy-windows
+          ref: ${{ inputs.source_ref }}
+          path: source
+          token: ${{ secrets.PRIVATE_SOURCE_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore packages
+        working-directory: source
+        run: dotnet restore src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj
+
+      - name: Build legacy application
+        working-directory: source
+        run: dotnet build src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj --configuration Release --no-restore /warnaserror
+
+      - name: Publish self-contained x64 application
+        working-directory: source
+        run: dotnet publish src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj --configuration Release --runtime win-x64 --self-contained true --no-restore --output publish /p:PublishSingleFile=false /p:PublishTrimmed=false
+
+      - name: Restore signing certificate
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'alrowad-signing.pfx'
+          [IO.File]::WriteAllBytes(
+            $certificatePath,
+            [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64)
+          )
+          "WINDOWS_SIGNING_CERTIFICATE_PATH=$certificatePath" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Locate SignTool
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signTool) { throw 'signtool.exe was not found on the Windows runner.' }
+          "WINDOWS_SIGNTOOL_PATH=$signTool" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Sign legacy application
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\publish\AL-ROWAD Logistics Legacy.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Signing the legacy executable failed.' }
+
+      - name: Create legacy installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.5
+        with:
+          path: source/installer/alrowad-legacy.iss
+
+      - name: Sign legacy installer
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 /f $env:WINDOWS_SIGNING_CERTIFICATE_PATH /p $env:SIGNING_CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td SHA256 'source\installer\output\AlRowad-Legacy-Setup-1.0.0.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Signing the legacy installer failed.' }
+
+      - name: Inspect legacy installer signature
+        if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $installer = 'source\installer\output\AlRowad-Legacy-Setup-1.0.0.exe'
+          & $env:WINDOWS_SIGNTOOL_PATH verify /pa /v $installer
+          $signToolExit = $LASTEXITCODE
+          $signature = Get-AuthenticodeSignature $installer
+          if (-not $signature.SignerCertificate) { throw 'The legacy installer does not contain a code-signing certificate.' }
+          if ($signature.SignerCertificate.Subject -notmatch 'Orient Software') { throw "Unexpected legacy installer signer: $($signature.SignerCertificate.Subject)" }
+          if (-not $signature.TimeStamperCertificate) { throw 'The legacy installer does not contain a timestamp certificate.' }
+          if ($signature.Status -ne 'Valid') { Write-Warning "Windows trust status: $($signature.Status). The signature and timestamp are present, but the private certificate chain is not installed in the runner trust store." }
+          if ($signToolExit -ne 0) { Write-Warning 'SignTool rejected the untrusted private certificate chain; signer and timestamp checks passed.' }
+          $global:LASTEXITCODE = 0
+
+      - name: Publish legacy installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AlRowad-Legacy-Setup-Windows
+          path: source/installer/output/AlRowad-Legacy-Setup-1.0.0.exe
+          if-no-files-found: error
+          retention-days: 7
