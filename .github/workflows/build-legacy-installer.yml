@@ -27,7 +27,7 @@ jobs:
           repository: anwrklel7/alrowad-legacy-windows
           ref: ${{ inputs.source_ref }}
           path: source
-          token: ${{ secrets.PRIVATE_SOURCE_READ_TOKEN }}
+          token: ${{ secrets.LEGACY_SOURCE_READ_TOKEN }}
           persist-credentials: false
 
       - name: Set up .NET
