@@ -53,20 +53,22 @@ jobs:
         working-directory: source/legacy-windows
         run: dotnet publish src/AlRowad.Legacy.App/AlRowad.Legacy.App.csproj --configuration Release --runtime win-x64 --self-contained true --no-restore --output publish /p:PublishSingleFile=false /p:PublishTrimmed=false
 
-      - name: Verify published PDF native dependency
+      - name: Verify published PDF native dependencies
         shell: pwsh
         run: |
-          $nativeDll = 'source\legacy-windows\publish\QuestPDF.Native.dll'
-          if (-not (Test-Path $nativeDll)) { throw 'QuestPDF.Native.dll is missing from the published application.' }
-          $item = Get-Item $nativeDll
-          if ($item.Length -lt 1024) { throw "QuestPDF.Native.dll is unexpectedly small: $($item.Length) bytes." }
-          $hash = (Get-FileHash $nativeDll -Algorithm SHA256).Hash
-          @(
-            'AL-ROWAD Logistics Legacy payload verification',
-            "QuestPDF.Native.dll bytes=$($item.Length)",
-            "QuestPDF.Native.dll SHA256=$hash"
-          ) | Set-Content -Path 'source\legacy-windows\publish\payload-verification.txt' -Encoding utf8
-          Write-Host "Verified QuestPDF.Native.dll: $($item.Length) bytes, SHA256 $hash"
+          $nativeFiles = @('QuestPdfSkia.dll', 'qpdf.dll')
+          $verification = @('AL-ROWAD Logistics Legacy payload verification')
+          foreach ($nativeName in $nativeFiles) {
+            $nativeDll = Join-Path 'source\legacy-windows\publish' $nativeName
+            if (-not (Test-Path $nativeDll)) { throw "$nativeName is missing from the published application." }
+            $item = Get-Item $nativeDll
+            if ($item.Length -lt 1024) { throw "$nativeName is unexpectedly small: $($item.Length) bytes." }
+            $hash = (Get-FileHash $nativeDll -Algorithm SHA256).Hash
+            $verification += "$nativeName bytes=$($item.Length)"
+            $verification += "$nativeName SHA256=$hash"
+            Write-Host "Verified $nativeName: $($item.Length) bytes, SHA256 $hash"
+          }
+          $verification | Set-Content -Path 'source\legacy-windows\publish\payload-verification.txt' -Encoding utf8
 
       - name: Restore signing certificate
         if: env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != ''
